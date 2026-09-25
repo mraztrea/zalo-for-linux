@@ -285,4 +285,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { main };
+module.exports = { main, integrateZaDark, bundleWineRuntime };
