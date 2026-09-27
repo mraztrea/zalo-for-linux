@@ -48,6 +48,11 @@ const WINE_DOWNLOAD_URL =
   'https://github.com/Kron4ek/Wine-Builds/releases/download/11.14/wine-11.14-amd64.tar.xz';
 const RUNTIME_DIRNAME = 'zcall-wine-runtime';
 const CONFIG_FILENAME = 'zcall-config.json';
+// Last successful validateWine() (writeConfig replaces the whole config file,
+// so it lives in its own file).
+const CHECK_FILENAME = 'zcall-wine-check.json';
+// Re-check a cached wine in the background this long after launch.
+const RECHECK_DELAY_MS = 20000;
 
 let dialogModule = null;
 let BrowserWindowModule = null;
@@ -202,6 +207,85 @@ function validateWine(winePath, prefix) {
     console.error('[zcall-bridge] wine validation threw:', e.message);
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Validation cache
+//
+// validateWine() blocks the main process (spawnSync, cold wineserver: ~1s,
+// up to the 120s timeout) on every launch, although the wine rarely changes.
+// A successful check is remembered by the size/mtime of wine and pipebridge
+// and the prefix. The bundled runtime is mounted at a random path per run, so
+// it is keyed as "bundled". A cached wine is used right away and re-checked
+// in the background; a failed re-check clears the cache so the next launch
+// validates again.
+// ---------------------------------------------------------------------------
+
+function fileStamp(p) {
+  try {
+    const st = fs.statSync(p);
+    return st.size + ':' + Math.floor(st.mtimeMs);
+  } catch (_) {
+    return null;
+  }
+}
+
+function wineCheckKey(winePath, prefix) {
+  const pipebridgePath = findPipebridgePath();
+  const wineStamp = fileStamp(winePath);
+  const pbStamp = pipebridgePath && fileStamp(pipebridgePath);
+  if (!wineStamp || !pbStamp) return null;
+  const id = winePath === findBundledWine() ? 'bundled' : winePath;
+  return [id, wineStamp, pbStamp, prefix].join('|');
+}
+
+function isWineCheckCached(userDataDir, winePath, prefix) {
+  const key = wineCheckKey(winePath, prefix);
+  if (!key) return false;
+  try {
+    const data = JSON.parse(fs.readFileSync(path.join(userDataDir, CHECK_FILENAME), 'utf8'));
+    return data.key === key;
+  } catch (_) {
+    return false;
+  }
+}
+
+function writeWineCheck(userDataDir, winePath, prefix) {
+  const key = winePath && wineCheckKey(winePath, prefix);
+  const file = path.join(userDataDir, CHECK_FILENAME);
+  try {
+    if (key) fs.writeFileSync(file, JSON.stringify({ key }));
+    else fs.rmSync(file, { force: true });
+  } catch (_) { /* cache only */ }
+}
+
+// Same check as validateWine(), without blocking the main process.
+function recheckWineLater(userDataDir, winePath, prefix) {
+  const timer = setTimeout(() => {
+    const pipebridgePath = findPipebridgePath();
+    if (!pipebridgePath) return;
+    let out = '';
+    let child;
+    try {
+      child = spawn(winePath, [pipebridgePath, '--version'], {
+        env: Object.assign({}, process.env, { WINEPREFIX: prefix, WINEDEBUG: '-all' }),
+        stdio: ['ignore', 'pipe', 'ignore']
+      });
+    } catch (e) {
+      writeWineCheck(userDataDir, null, prefix);
+      return;
+    }
+    const kill = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 120000);
+    child.stdout.on('data', (d) => { out += d; });
+    child.on('error', () => {});
+    child.on('close', (code) => {
+      clearTimeout(kill);
+      if (code === 0 && /pipebridge/.test(out)) return;
+      debugLog('background re-check FAILED wine=' + winePath + ' status=' + code + ' — cache cleared');
+      writeWineCheck(userDataDir, null, prefix);
+    });
+  }, RECHECK_DELAY_MS);
+  if (timer.unref) timer.unref();
 }
 
 /**
@@ -592,8 +676,14 @@ function launch({ userDataDir }) {
     }
 
     // A wine is only usable if it can run 32-bit executables.
+    if (isWineCheckCached(userDataDir, candidate, prefix)) {
+      wine = candidate;
+      recheckWineLater(userDataDir, candidate, prefix);
+      break;
+    }
     if (validateWine(candidate, prefix)) {
       wine = candidate;
+      writeWineCheck(userDataDir, candidate, prefix);
       break;
     }
     console.error('[zcall-bridge] wine cannot run 32-bit apps, skipping:', candidate);
@@ -656,6 +746,7 @@ function launch({ userDataDir }) {
       if (/^\d+x\d+$/.test(out.trim())) cachedBridgeRes = out.trim();
     } catch (e) { /* default */ }
     watchShareRequests();
+    watchCallState();
   }
 
   console.log('[zcall-bridge] wine ready:', wine, '(prefix:', prefix + ')');
@@ -681,6 +772,46 @@ function watchShareRequests() {
     debugLog('screenbridge: share request detected — starting bridge');
     startScreenBridge();
   }, 200);
+}
+
+// ZaloCall -> renderer signal sent when screen sharing is turned on
+// (status 1) or off (status 0) during a call.
+const SIGNAL_SCREEN_SHARE = 12064;
+
+/**
+ * Stops the screen bridge when sharing stops or the call ends (#91).
+ * ZaloCall reports both to the renderer through the main process: sharing
+ * as call-send-signal 12064 {status}, the call as call-update/callState
+ * (Zalo treats every state except "free" as a running call). Without this,
+ * Xvfb, the portal stream and the gst pipeline stayed up until the app quit.
+ */
+function watchCallState() {
+  let electron;
+  try { electron = require('electron'); } catch (e) { return; }
+  const stop = (why) => {
+    if (!screenBridgeActive()) return;
+    debugLog('screenbridge: ' + why + ' — stopping bridge');
+    stopScreenBridge();
+    // The next share must not wait out the denial cooldown.
+    lastAutoBridgeAt = 0;
+  };
+  const hook = (contents) => {
+    if (!contents || contents.__zcallStateHooked) return;
+    contents.__zcallStateHooked = true;
+    const send = contents.send;
+    contents.send = function (channel, command, data, ...rest) {
+      if (channel === 'call-update' && command === 'callState' &&
+          data && data.state === 'free') {
+        stop('call ended');
+      } else if (channel === 'call-send-signal' && Number(command) === SIGNAL_SCREEN_SHARE &&
+          data && Number(data.status) === 0) {
+        stop('sharing stopped');
+      }
+      return send.call(this, channel, command, data, ...rest);
+    };
+  };
+  electron.webContents.getAllWebContents().forEach(hook);
+  electron.app.on('web-contents-created', (_e, contents) => hook(contents));
 }
 
 /**
@@ -1159,7 +1290,9 @@ function startScreenBridge() {
     });
     py.on('exit', (code) => {
       debugLog('screenbridge: python exited code=' + code + ' granted=' + bridgeGranted);
-      stopScreenBridge();
+      // After a call-end stop this python is no longer ours; a bridge
+      // started since then must not be torn down by its late exit event.
+      if (bridgeProcs.includes(py)) stopScreenBridge();
     });
     bridgeProcs.push(py);
     // Let gst create its window, then stretch every window on the Xvfb
