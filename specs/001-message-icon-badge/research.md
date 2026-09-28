@@ -18,13 +18,13 @@
 
 ## Quyết định 3: Badge thanh tác vụ trên KDE
 
-**Decision**: Gắn badge với ID `.desktop` thực tế và phát từ kết nối còn sống. Kiểm chứng `app.setBadgeCount` của Electron 22 trước; chỉ thêm client D-Bus duy trì kết nối nếu đường native không tạo badge ổn định trên KDE.
+**Decision**: Phát `com.canonical.Unity.LauncherEntry.Update` cho `application://zalo.desktop` qua một kết nối session D-Bus còn sống cùng ứng dụng; tiếp tục gọi `app.setBadgeCount` để hỗ trợ Unity.
 
-**Rationale**: KDE Task Manager nhận `com.canonical.Unity.LauncherEntry.Update`, tìm ứng dụng theo `application://<desktop-file>` và loại badge khi tiến trình gửi rời bus. Lệnh `gdbus emit` hiện tại là tiến trình ngắn hạn, nên không thể là nguồn badge bền. Trên máy thử nghiệm có `/usr/share/applications/zalo.desktop`, còn các gói có thể dùng ID khác; cần đối chiếu file cài thực tế. KDE cũng tự ẩn badge taskbar khi bật Không làm phiền hoặc tắt badge trong Task Manager; đó là giới hạn của môi trường, không dùng cách thay icon cửa sổ để lách vì KDE ưu tiên icon của launcher đã cài.
+**Rationale**: Người dùng xác nhận Plasma không hiện badge khi thông báo Zalo bật và Không làm phiền tắt. Electron 22 ghi rõ `app.setBadgeCount` trên Linux chỉ hoạt động với Unity launcher, nên không đủ làm đường chính cho Plasma. KDE Task Manager nhận tín hiệu Unity LauncherEntry theo ID `application://<desktop-file>`; sender ngắn hạn bị mất khi tiến trình gửi rời bus. Môi trường cài đặt có `/usr/share/applications/zalo.desktop`, nên dùng ID `zalo.desktop` mặc định và cho phép ghi đè qua `ZALO_DESKTOP_FILE`. Khi còn tin chưa đọc, phát lại trạng thái mỗi 5 giây để KDE khôi phục badge sau khi biểu tượng xuất hiện lại. KDE vẫn có thể ẩn badge khi bật Không làm phiền hoặc tắt badge trong Task Manager.
 
-**Alternatives considered**: Giữ `gdbus emit` một lần (KDE xóa trạng thái khi sender thoát); đổi icon `BrowserWindow` (không đáng tin với launcher đã ghim); thêm D-Bus dependency ngay (chỉ làm khi native path không đủ).
+**Alternatives considered**: Giữ `gdbus emit` một lần (KDE xóa trạng thái khi sender thoát); đổi icon `BrowserWindow` (không đáng tin với launcher đã ghim); chỉ gọi API native (Electron 22 tài liệu hóa Linux badge cho Unity launcher).
 
-**Sources**: [KDE Smart Launcher backend](https://github.com/KDE/plasma-desktop/blob/master/applets/taskmanager/smartlauncherbackend.cpp), [Electron 22 app API](https://github.com/electron/electron/blob/v22.3.27/docs/api/app.md), [Flatpak Electron desktop integration](https://github.com/flatpak/flatpak-docs/blob/master/docs/electron.rst).
+**Sources**: [KDE Smart Launcher backend](https://github.com/KDE/plasma-desktop/blob/master/applets/taskmanager/smartlauncherbackend.cpp), [Electron 22 app API](https://github.com/electron/electron/blob/v22.3.27/docs/api/app.md), [dbus-next](https://github.com/dbusjs/node-dbus-next).
 
 ## Quyết định 4: Badge khay hệ thống
 
@@ -39,3 +39,14 @@
 ## Giới hạn nghiệm thu
 
 Trường hợp bắt buộc đầu tiên là KDE Plasma với thông báo Zalo bật và Không làm phiền tắt, đúng hiện tượng người dùng báo. Sau đó kiểm tra thông báo Zalo tắt, cửa sổ ẩn, hội thoại tắt tiếng, đọc hết và khởi động lại. Badge taskbar khi KDE bật Không làm phiền không được bảo đảm vì KDE chủ động ẩn nó; icon khay vẫn có thể hiển thị dấu chấm.
+
+## Kết quả T001 và T002
+
+- Người dùng đã tái hiện lỗi gốc trên KDE Plasma: thông báo Zalo bật, Không làm phiền tắt nhưng không có badge. Môi trường hiện tại báo `XDG_CURRENT_DESKTOP=KDE` và `XDG_SESSION_TYPE=wayland`; lệnh truy cập session D-Bus trong sandbox bị từ chối (`Operation not permitted`), nên chưa thể quan sát trực tiếp Task Manager hoặc chạy lại giao diện sau build.
+- Desktop entry cài đặt là `/usr/share/applications/zalo.desktop` với `StartupWMClass=zalo` và `Icon=zalo`.
+- Bundle `compact-app-pc.*.js` và bản sao `lazy/default-login-main-startup-shared-worker-znotification.*.js` đều có handler `const{unreadNoMute:t,convId:n,curentUnreadNoMute:a}=e.payload;this.totalCurrent=t;`. Bản vá thay `unreadNoMute:t` bằng `totalUnread:t`; nhánh cửa sổ hội thoại tiếp tục dùng `curentUnreadNoMute:a`.
+- Hai bundle đều đăng ký `UnreadDataManager.ChangeUnreadCount` sau 100 ms. Manager có `getUnreadByConvIdSync("total")`; bản vá đọc mục `total` sau đăng ký để khôi phục trạng thái đã tải. Mã đăng xuất trong bundle gọi `$zapp.updateBadgeCount(0)` trước khi tải lại màn hình đăng nhập; handler unread cũng kiểm tra `getDidLogOut()` và ép số đếm về 0.
+- `app/main-dist/compact-app.js` nhận IPC `badge-count`; số đếm là đối số đầu tiên sau event. Handler Zalo gọi `app.setBadgeCount` trên Linux nhưng không thay ảnh Tray.
+- Runtime KDE và kiểm tra badge hai icon vẫn cần xác nhận theo các ca trong [quickstart.md](quickstart.md); sandbox này không cho phép kết nối tới session D-Bus.
+- Cần `dbus-next@0.10.2` để giữ kết nối session D-Bus. Registry npm trả về `EAI_AGAIN` trong môi trường này, nên package chưa được cài và `package-lock.json` chưa có cây dependency đầy đủ; workflow `npm ci` cần được xác nhận sau khi registry truy cập được.
+- `npm run main:setup` dừng ở kiểm tra phiên bản vì DNS `zalo.me` không phân giải được. Trích xuất trực tiếp DMG cục bộ không hoàn tất sau vài phút và đã bị dừng; không thể xác nhận trọn pipeline build ở đây.

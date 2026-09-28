@@ -9,6 +9,7 @@
 ## Chuẩn bị và chạy
 
 ```bash
+npm install
 npm run main:setup
 npm run main:build
 node --test test/launcher-badge.test.js
@@ -26,3 +27,7 @@ Chạy AppImage vừa tạo trong `dist/` sau khi tích hợp nó vào menu KDE.
 6. Lặp ca 1 khi cửa sổ hiện và khi thu nhỏ. Nếu có phiên KDE X11, lặp ca 1–2 trên X11.
 
 Nếu taskbar không hiện badge nhưng khay có dấu chấm, kiểm tra ID `.desktop` của launcher đã cài và tín hiệu `com.canonical.Unity.LauncherEntry.Update` từ tiến trình Zalo; xem [research.md](research.md). Khi KDE bật Không làm phiền, taskbar có thể tự ẩn badge; đó không phải ca nghiệm thu bắt buộc.
+
+## Trạng thái kiểm thử môi trường
+
+Ca giao diện KDE sau build chưa chạy được trong sandbox phát triển: kết nối session D-Bus trả về `Operation not permitted`. Người dùng đã xác nhận lỗi nền trên Plasma khi thông báo Zalo bật và Không làm phiền tắt. `npm install` và `npm run main:setup` cũng chưa chạy xong vì DNS registry/Zalo bị chặn; dependency `dbus-next` cần được cài để đồng bộ lockfile trước khi build. Cần chạy lại các ca trên bản build mới để xác nhận icon taskbar và icon khay cùng đổi trạng thái.

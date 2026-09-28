@@ -11,6 +11,7 @@ const appDir = fs.existsSync(path.join(__dirname, 'app'))
   : path.join(path.dirname(process.execPath), 'app');
 
 const iconPath = path.join(appDir, 'pc-dist', 'favicon-512x512.png');
+const unreadIconPath = path.join(__dirname, 'assets', 'tray-unread.png');
 
 // ---------------------------------------------------------------------------
 // State
@@ -247,7 +248,7 @@ app.once('ready', () => {
   }
 
 // Register plugins
-  launcherBadgePlugin.register({ app, ipcMain });
+  launcherBadgePlugin.register({ app, ipcMain, tray, iconPath, unreadIconPath });
   screenshotPlugin.register({ ipcMain });
   notificationPrivacyPlugin.register({ app, BrowserWindow });
   userscriptsPlugin.register({ app, ipcMain, BrowserWindow });

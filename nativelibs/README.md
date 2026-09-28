@@ -89,6 +89,7 @@ To add a new reimplementation:
 Building addons requires:
 
 - Node.js (matches project version)
+- Rust stable toolchain (`cargo` and `rustc`) for Rust-based addons
 - C++ compiler (gcc/clang)
 - `node-gyp` (installed via npm)
 - OpenSSL development headers (`libssl-dev`) — for crypto addons

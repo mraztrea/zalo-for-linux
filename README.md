@@ -85,6 +85,7 @@ Prerequisites:
 
 - Linux x86_64 or aarch64
 - Node.js and npm
+- Rust stable toolchain (`cargo` and `rustc`), installed via [rustup](https://rustup.rs)
 - 7z (p7zip-full) for extracting the macOS app during setup
 - C++ build tools (for native addons): `build-essential`, `libssl-dev`, `liblzma-dev`
 - `zcall` build tools: `gcc-mingw-w64-i686` `gcc-multilib` `libc6-dev-i386` `libx11-dev` `libxcb1-dev` `libx11-dev:i386` `libxcb1-dev:i386` `libxext-dev:i386`

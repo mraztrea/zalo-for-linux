@@ -22,7 +22,7 @@ Zalo for Linux cần hiện dấu chấm khi còn tin nhắn chưa đọc trên 
 
 **Project Type**: Ứng dụng desktop Electron, bọc ứng dụng Zalo gốc
 
-**Performance Goals**: Badge phản ánh trạng thái mới trong 5 giây; cập nhật chỉ khi trạng thái hiện/ẩn thay đổi
+**Performance Goals**: Badge phản ánh trạng thái mới trong 5 giây; ảnh khay và badge native chỉ cập nhật khi trạng thái đổi, còn tín hiệu D-Bus được phát lại mỗi 5 giây khi còn tin chưa đọc để khôi phục trạng thái của KDE
 
 **Constraints**: `app/` được tái tạo và không theo dõi trong Git; không sửa trực tiếp bundle đã trích xuất. Tên ứng dụng gửi badge phải khớp `.desktop` đã cài. KDE có thể tự ẩn badge thanh tác vụ khi bật Không làm phiền.
 
@@ -71,7 +71,7 @@ app/                                      # bundle sinh ra khi build, không s�
 1. Tái hiện ca lỗi gốc trên KDE: xác nhận `badge-count` có đến tiến trình chính, `app.setBadgeCount` trả về gì, KDE nhận tín hiệu D-Bus nào, launcher thực tế dùng `.desktop` nào và Task Manager có bật badge. Kết quả phân biệt lỗi nguồn số đếm với lỗi gắn biểu tượng.
 2. Trong bản vá build, sửa đúng handler badge của renderer để dùng `totalUnread` từ `UnreadDataManager` cho cửa sổ chính; kiểm tra bản vá khớp đúng nguồn của phiên bản Zalo đang đóng gói và fail rõ nếu bundle thay đổi. Đồng bộ giá trị ban đầu sau khi đăng ký sự kiện để không bỏ sót lần tải đầu.
 3. Trong wrapper, nghe sự kiện IPC `badge-count` vốn được `$zapp.updateBadgeCount` gửi đi. Quy về một boolean `hasUnread`; bỏ qua lần cập nhật trùng. Bỏ listener dựa trên tiêu đề cửa sổ, IPC badge riêng không có sender và bản vá `patch-notification-badge.js` trùng lặp. Khi đăng xuất hoặc ứng dụng thoát, đặt trạng thái về false. Giữ badge độc lập với cài đặt thông báo Zalo và trạng thái hiển thị cửa sổ.
-4. Với thanh tác vụ KDE, dùng đường phát badge có kết nối tồn tại cùng tiến trình ứng dụng và định danh đúng file `.desktop` đã cài. Kiểm chứng lời gọi `app.setBadgeCount` vốn có của Zalo trên Electron 22 trước; bỏ `gdbus emit` ngắn hạn. Nếu kiểm tra D-Bus cho thấy đường native không phát badge lâu bền, dùng client D-Bus sống cùng ứng dụng. Không thêm client D-Bus khi đường Electron hoạt động.
+4. Với thanh tác vụ KDE, phát `com.canonical.Unity.LauncherEntry.Update` qua client `dbus-next` giữ kết nối session D-Bus sống cùng ứng dụng, dùng ID `application://zalo.desktop` đã cài. Phát lại trạng thái mỗi 5 giây khi còn tin chưa đọc để KDE nhận lại badge nếu biểu tượng xuất hiện lại. Gọi thêm `app.setBadgeCount` để giữ hỗ trợ Unity; không dùng `gdbus emit` ngắn hạn.
 5. Với khay hệ thống, dùng `Tray.setImage` để chuyển giữa icon gốc và một PNG có dấu chấm được đóng gói sẵn. Khôi phục icon gốc khi hết tin chưa đọc. Không gắn nội dung hoặc tên người gửi vào badge.
 6. Thêm một kiểm tra tự động nhỏ cho nguồn `totalUnread` và chuyển trạng thái 0 → dương → 0, rồi chạy ma trận kiểm thử KDE trong [quickstart.md](quickstart.md), gồm ca lỗi gốc: bật thông báo, Không làm phiền tắt, cửa sổ ẩn.
 

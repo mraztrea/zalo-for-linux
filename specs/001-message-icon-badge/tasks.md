@@ -26,7 +26,7 @@
 
 **Purpose**: Chốt điểm nối vào bundle của phiên bản Zalo hiện tại, dùng chung cho cả hai story.
 
-- [ ] T002 Đối chiếu `app/pc-dist/compact-app-pc.*.js`, bản sao `app/pc-dist/lazy/default-login-main-startup-shared-worker-znotification.*.js` nếu có, và `app/main-dist/compact-app.js` với `totalUnread`, `unreadNoMute` và payload `badge-count`; ghi chuỗi neo bản vá cùng thứ tự đối số vào `specs/001-message-icon-badge/research.md` để bản vá fail rõ khi nguồn thay đổi.
+- [X] T002 Đối chiếu `app/pc-dist/compact-app-pc.*.js`, bản sao `app/pc-dist/lazy/default-login-main-startup-shared-worker-znotification.*.js` nếu có, và `app/main-dist/compact-app.js` với `totalUnread`, `unreadNoMute` và payload `badge-count`; ghi chuỗi neo bản vá cùng thứ tự đối số vào `specs/001-message-icon-badge/research.md` để bản vá fail rõ khi nguồn thay đổi.
 
 **Checkpoint**: Đã biết tin chưa đọc đi qua nguồn nào và taskbar hiện nhận định danh ứng dụng nào.
 
@@ -40,16 +40,16 @@
 
 ### Tests for User Story 1
 
-- [ ] T003 [P] [US1] Viết một kiểm tra `node:test` trong `test/launcher-badge.test.js` cho `totalUnread` là số nguyên không âm, `hasUnread = totalUnread > 0`, IPC `badge-count` và ảnh tray `normal`/`dot`; chạy kiểm tra để xác nhận nó thất bại trước khi viết phần xử lý.
+- [X] T003 [P] [US1] Viết một kiểm tra `node:test` trong `test/launcher-badge.test.js` cho `totalUnread` là số nguyên không âm, `hasUnread = totalUnread > 0`, IPC `badge-count` và ảnh tray `normal`/`dot`; chạy kiểm tra để xác nhận nó thất bại trước khi viết phần xử lý.
 
 ### Implementation for User Story 1
 
-- [ ] T004 [P] [US1] Tạo `assets/tray-unread.png` từ biểu tượng Zalo với dấu chấm dễ thấy ở kích thước khay 16–24 px; giữ `app/pc-dist/favicon-512x512.png` làm ảnh bình thường và xác nhận asset mới được đóng gói bởi `package.json`.
-- [ ] T005 [US1] Thêm bản vá exact-match trong `scripts/patches/patch-unread-badge-source.js` và gọi nó từ `scripts/prepare-app.js`: handler badge của cửa sổ chính phải dùng `totalUnread` thay `unreadNoMute`, gồm bản sao bundle được dùng lúc chạy; báo lỗi nếu chuỗi neo không còn khớp, không sửa trực tiếp file theo dõi dưới `app/`.
-- [ ] T006 [US1] Trong `plugins/launcher-badge/index.js`, thay IPC riêng và parser tiêu đề bằng listener `badge-count`; từ số nguyên không âm suy ra `hasUnread = count > 0`, đổi `Tray.setImage` sang `assets/tray-unread.png` khi true và ảnh gốc khi false, không phụ thuộc popup thông báo hoặc cửa sổ hiện/ẩn.
-- [ ] T007 [P] [US1] Trong `main.js`, truyền Tray và hai đường dẫn ảnh cho `plugins/launcher-badge/index.js` sau khi tạo Tray, đồng thời giữ controller hoạt động nếu máy không có khay hệ thống.
+- [X] T004 [P] [US1] Tạo `assets/tray-unread.png` từ biểu tượng Zalo với dấu chấm dễ thấy ở kích thước khay 16–24 px; giữ `app/pc-dist/favicon-512x512.png` làm ảnh bình thường và xác nhận asset mới được đóng gói bởi `package.json`.
+- [X] T005 [US1] Thêm bản vá exact-match trong `scripts/patches/patch-unread-badge-source.js` và gọi nó từ `scripts/prepare-app.js`: handler badge của cửa sổ chính phải dùng `totalUnread` thay `unreadNoMute`, gồm bản sao bundle được dùng lúc chạy; báo lỗi nếu chuỗi neo không còn khớp, không sửa trực tiếp file theo dõi dưới `app/`.
+- [X] T006 [US1] Trong `plugins/launcher-badge/index.js`, thay IPC riêng và parser tiêu đề bằng listener `badge-count`; từ số nguyên không âm suy ra `hasUnread = count > 0`, đổi `Tray.setImage` sang `assets/tray-unread.png` khi true và ảnh gốc khi false, không phụ thuộc popup thông báo hoặc cửa sổ hiện/ẩn.
+- [X] T007 [P] [US1] Trong `main.js`, truyền Tray và hai đường dẫn ảnh cho `plugins/launcher-badge/index.js` sau khi tạo Tray, đồng thời giữ controller hoạt động nếu máy không có khay hệ thống.
 - [ ] T008 [P] [US1] Trong `plugins/launcher-badge/index.js`, bỏ `gdbus emit` ngắn hạn và bảo đảm `taskbarBadgeRequested = hasUnread` được phát từ kết nối sống cùng ứng dụng cho đúng ID `.desktop` ghi ở T001; dùng `app.setBadgeCount` nếu T001 xác nhận nó bền trên KDE, còn nếu không thì dùng client D-Bus sống cùng ứng dụng (cập nhật `package.json` chỉ khi cần phụ thuộc).
-- [ ] T009 [P] [US1] Bỏ lệnh gọi bản vá IPC riêng cũ trong `scripts/prepare-app.js` và xóa `scripts/patches/patch-notification-badge.js` sau khi T005 được nối vào pipeline; không để hai publisher badge cạnh tranh.
+- [X] T009 [P] [US1] Bỏ lệnh gọi bản vá IPC riêng cũ trong `scripts/prepare-app.js` và xóa `scripts/patches/patch-notification-badge.js` sau khi T005 được nối vào pipeline; không để hai publisher badge cạnh tranh.
 - [ ] T010 [US1] Chạy ca 1–3 của `specs/001-message-icon-badge/quickstart.md` trên bản build KDE mới, ghi kết quả hai icon, bật/tắt thông báo Zalo, hội thoại tắt tiếng và thời gian hiển thị vào chính file đó; chỉ đánh dấu US1 xong khi cả hai icon đạt.
 
 **Checkpoint**: US1 chạy độc lập như MVP; còn tin chưa đọc thì có badge ở cả hai vị trí, không cần hoàn thiện khôi phục sau khởi động.
@@ -64,12 +64,12 @@
 
 ### Tests for User Story 2
 
-- [ ] T011 [US2] Mở rộng `test/launcher-badge.test.js` cho chuỗi `0 → dương → dương → 0`, cập nhật trùng không đổi ảnh, giá trị ban đầu sau tải dữ liệu và đặt 0 khi đăng xuất/thoát; chạy kiểm tra để xác nhận các ca mới thất bại trước khi sửa mã.
+- [X] T011 [US2] Mở rộng `test/launcher-badge.test.js` cho chuỗi `0 → dương → dương → 0`, cập nhật trùng không đổi ảnh, giá trị ban đầu sau tải dữ liệu và đặt 0 khi đăng xuất/thoát; chạy kiểm tra để xác nhận các ca mới thất bại trước khi sửa mã.
 
 ### Implementation for User Story 2
 
-- [ ] T012 [P] [US2] Trong `scripts/patches/patch-unread-badge-source.js`, sau khi đăng ký sự kiện hãy phát trạng thái ban đầu từ tổng chưa đọc đã tải và đặt 0 khi Zalo đăng xuất; vẫn dùng `totalUnread` là số nguyên không âm, gồm hội thoại tắt tiếng.
-- [ ] T013 [P] [US2] Trong `plugins/launcher-badge/index.js`, chỉ cập nhật khi `hasUnread` đổi, khôi phục ảnh `normal` và xóa badge taskbar khi nhận 0 hoặc `before-quit`, không để badge của tài khoản cũ sau đăng xuất hay sự kiện đồng bộ đã đọc.
+- [X] T012 [P] [US2] Trong `scripts/patches/patch-unread-badge-source.js`, sau khi đăng ký sự kiện hãy phát trạng thái ban đầu từ tổng chưa đọc đã tải và đặt 0 khi Zalo đăng xuất; vẫn dùng `totalUnread` là số nguyên không âm, gồm hội thoại tắt tiếng.
+- [X] T013 [P] [US2] Trong `plugins/launcher-badge/index.js`, chỉ cập nhật ảnh khay và badge native khi trạng thái đổi; phát lại trạng thái D-Bus mỗi 5 giây khi còn tin chưa đọc để KDE khôi phục badge sau khi biểu tượng xuất hiện lại, rồi dừng phát lại khi nhận 0 hoặc `before-quit`.
 - [ ] T014 [US2] Chạy ca 4–6 của `specs/001-message-icon-badge/quickstart.md` trên KDE: đọc một trong hai cuộc trò chuyện, đọc hết, đồng bộ từ thiết bị khác, khởi động lại, đăng xuất và cửa sổ hiện/thu nhỏ; ghi kết quả và độ trễ vào file đó.
 
 **Checkpoint**: US2 có thể kiểm chứng riêng bằng các chuyển trạng thái, trên nền badge đã có của US1.

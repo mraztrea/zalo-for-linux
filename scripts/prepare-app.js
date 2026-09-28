@@ -196,8 +196,8 @@ async function extractAppAsar() {
   const { main: patchQuitNoShow } = require('./patches/patch-quit-no-show');
   await patchQuitNoShow();
 
-  const { main: patchNotificationBadge } = require('./patches/patch-notification-badge');
-  await patchNotificationBadge();
+  const { main: patchUnreadBadgeSource } = require('./patches/patch-unread-badge-source');
+  await patchUnreadBadgeSource();
 
   const { main: patchXdgUserDirs } = require('./patches/patch-xdg-user-dirs');
   await patchXdgUserDirs();

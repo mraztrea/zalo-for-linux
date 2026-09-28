@@ -89,6 +89,7 @@
     }
   },
   "dependencies": {
+    "dbus-next": "0.10.2",
     "fs-extra": "^11.4.0"
   }
 }
