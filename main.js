@@ -38,6 +38,7 @@ if (process.platform === 'linux') {
 
 const screenshotPlugin = require('./plugins/screenshot');
 const launcherBadgePlugin = require('./plugins/launcher-badge');
+const notificationPrivacyPlugin = require('./plugins/notification-privacy');
 const userscriptsPlugin = require('./plugins/userscripts');
 const zcallBridgePlugin = require('./plugins/zcall-bridge');
 const trayHost = require('./plugins/tray-host');
@@ -248,6 +249,7 @@ app.once('ready', () => {
 // Register plugins
   launcherBadgePlugin.register({ app, ipcMain });
   screenshotPlugin.register({ ipcMain });
+  notificationPrivacyPlugin.register({ app, BrowserWindow });
   userscriptsPlugin.register({ app, ipcMain, BrowserWindow });
   zcallBridgePlugin.launch({ userDataDir: app.getPath('userData') });
 });

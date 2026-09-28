@@ -213,6 +213,9 @@ async function extractAppAsar() {
 
   const { main: patchAutoTheme } = require('./patches/patch-auto-theme');
   await patchAutoTheme();
+
+  const { main: patchNotificationPrivacy } = require('./patches/patch-notification-privacy');
+  await patchNotificationPrivacy();
 }
 
 function commandExists(command) {

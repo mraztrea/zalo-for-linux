@@ -11,6 +11,7 @@
     "prepare-app": "node scripts/prepare-app.js",
     "build": "node scripts/build.js",
     "build:deb": "node scripts/build-deb.js",
+    "build:deb:all": "npm run main:setup && npm run build:deb",
     "build:deb:full": "node scripts/build-deb.js --full",
     "main": "SETUP=true BUILD=true node scripts/main.js",
     "main:setup": "SETUP=true node scripts/main.js",
