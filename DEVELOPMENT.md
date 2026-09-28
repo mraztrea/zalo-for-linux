@@ -13,12 +13,18 @@ reimplementation, see [nativelibs/README.md](./nativelibs/README.md).
 - Node.js and npm
 - `7z` (`p7zip-full`) for extracting the macOS app
 - C++ build tools for native addons (see [nativelibs/README.md](./nativelibs/README.md#requirements))
+- Rust toolchain (`cargo`, `rustc`) — most addons under `nativelibs/` are Rust and are
+  compiled during setup; `cargo` must be on `PATH`
 
 On Debian/Ubuntu:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y p7zip-full build-essential libssl-dev liblzma-dev
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ```
+
+The optional call engine additionally needs `gcc-mingw-w64-i686`; without it the
+build still completes, with calls disabled.
 
 ## Quick Start
 
@@ -29,6 +35,9 @@ cd zalo-for-linux
 
 # Init submodules (ZaDark, etc.)
 git submodule update --init --recursive
+
+# Install JS dependencies (electron, electron-builder, fs-extra, ...)
+npm install
 
 # Setup + build (downloads DMG, extracts, patches, packages)
 npm run main
