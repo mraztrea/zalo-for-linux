@@ -8,12 +8,21 @@ const path = require('path');
 const DBUS_OBJECT_PATH = '/com/canonical/Unity/LauncherEntry';
 const DBUS_SIGNAL = 'com.canonical.Unity.LauncherEntry.Update';
 const BADGE_COLOR = '#e5342b';
+// Sentinel the source patch (patch-notification-privacy.js) sets as the
+// window title from inside Zalo's own notification-building code, since that
+// code runs with no reliable ipcRenderer access. Never meant to be seen: the
+// page-title-updated handler below swallows it before it reaches the window.
+const UNREAD_PING_TITLE = '__ZALO_UNREAD_PING__';
+// A window whose title matches one of these never represents the chat the
+// user is actually looking at, so focusing it should not clear the badge.
+const BACKGROUND_WINDOW_TITLES = ['Shared Worker', 'SQLite'];
 
 let _app = null;
 let _tray = null;
 let _iconDataUrl = null;
 let _compositorWin = null;
 let _state = { mode: 'none', count: 0 }; // mode: 'none' | 'dot' | 'count'
+let _pingCount = 0;
 let _gdbusAvailable = null;
 let _desktopFiles = null;
 let _trayBadgeSeq = 0;
@@ -87,17 +96,37 @@ function register({ app, ipcMain, tray, iconPath }) {
     setCount(rawCount);
   });
 
-  // Fallback for renderer code that only knows "there is something unread",
-  // not the exact number (e.g. muted conversations, grouped notifications).
+  // Sent by patch-notification-privacy.js's injection into
+  // Notifier.createNotifyForMessages() — the one confirmed place in Zalo's
+  // own bundled code that runs for every incoming message notification, so
+  // it fires whether or not the OS actually shows a popup for it. We don't
+  // get an exact unread count from it, only "one more thing arrived", so it
+  // accumulates into a running counter that resets when the user focuses the
+  // window again.
   ipcMain.on('zalo-notification-has-unread', (_event, hasUnread) => {
-    if (hasUnread) setDot();
-    else clearBadge();
+    if (hasUnread) {
+      _pingCount += 1;
+      setCount(_pingCount);
+    } else {
+      clearBadge();
+    }
   });
 
   app.on('browser-window-created', (_event, win) => {
-    win.on('page-title-updated', (_event, title) => {
+    win.on('page-title-updated', (event, title) => {
+      if (title === UNREAD_PING_TITLE) {
+        event.preventDefault();
+        _pingCount += 1;
+        setCount(_pingCount);
+        return;
+      }
       const count = parseTitleCount(title);
       if (count !== null) setCount(count);
+    });
+
+    win.on('focus', () => {
+      if (BACKGROUND_WINDOW_TITLES.includes(win.getTitle())) return;
+      clearBadge();
     });
   });
 
@@ -119,6 +148,7 @@ function setDot() {
 }
 
 function clearBadge() {
+  _pingCount = 0;
   applyState({ mode: 'none', count: 0 });
 }
 
@@ -379,6 +409,7 @@ function parseTitleCount(title) {
 module.exports = {
   init,
   register,
+  UNREAD_PING_TITLE,
   _private: {
     getDesktopFiles,
     discoverInstalledDesktopFiles,
@@ -390,8 +421,10 @@ module.exports = {
     setDot,
     clearBadge,
     getState: () => _state,
+    getPingCount: () => _pingCount,
     resetState: () => {
       _state = { mode: 'none', count: 0 };
+      _pingCount = 0;
       _desktopFiles = null;
       _gdbusAvailable = null;
       _app = null;

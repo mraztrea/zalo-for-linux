@@ -125,11 +125,70 @@ test('register() wires the IPC channels and the window title to the badge state'
   ipcMain.emit('zalo-notification-badge-count', {}, '0');
   assert.deepEqual(getState(), { mode: 'none', count: 0 });
 
-  ipcMain.emit('zalo-notification-has-unread', {}, true);
-  assert.deepEqual(getState(), { mode: 'dot', count: 0 });
-
   const win = new EventEmitter();
+  win.getTitle = () => 'Zalo';
   app.emit('browser-window-created', {}, win);
   win.emit('page-title-updated', {}, '(9) Zalo');
   assert.deepEqual(getState(), { mode: 'count', count: 9 });
+});
+
+test('each "has unread" ping bumps a running counter, reset when the window is focused', () => {
+  const app = new EventEmitter();
+  app.setDesktopName = () => {};
+  const ipcMain = new EventEmitter();
+  ipcMain.on = ipcMain.addListener.bind(ipcMain);
+
+  register({ app, ipcMain, tray: null, iconPath: null });
+
+  const win = new EventEmitter();
+  win.getTitle = () => 'Zalo';
+  app.emit('browser-window-created', {}, win);
+
+  ipcMain.emit('zalo-notification-has-unread', {}, true);
+  assert.deepEqual(getState(), { mode: 'count', count: 1 });
+  ipcMain.emit('zalo-notification-has-unread', {}, true);
+  assert.deepEqual(getState(), { mode: 'count', count: 2 });
+
+  win.emit('focus');
+  assert.deepEqual(getState(), { mode: 'none', count: 0 });
+
+  ipcMain.emit('zalo-notification-has-unread', {}, true);
+  assert.deepEqual(getState(), { mode: 'count', count: 1 });
+});
+
+test('the sentinel window title also bumps the counter and is never let through to the window', () => {
+  const app = new EventEmitter();
+  app.setDesktopName = () => {};
+  const ipcMain = new EventEmitter();
+  ipcMain.on = ipcMain.addListener.bind(ipcMain);
+
+  register({ app, ipcMain, tray: null, iconPath: null });
+
+  const win = new EventEmitter();
+  win.getTitle = () => 'Zalo';
+  app.emit('browser-window-created', {}, win);
+
+  let prevented = false;
+  win.emit('page-title-updated', { preventDefault: () => { prevented = true; } }, '__ZALO_UNREAD_PING__');
+  assert.equal(prevented, true);
+  assert.deepEqual(getState(), { mode: 'count', count: 1 });
+});
+
+test('focusing a background helper window (Shared Worker/SQLite) does not clear the badge', () => {
+  const app = new EventEmitter();
+  app.setDesktopName = () => {};
+  const ipcMain = new EventEmitter();
+  ipcMain.on = ipcMain.addListener.bind(ipcMain);
+
+  register({ app, ipcMain, tray: null, iconPath: null });
+
+  const win = new EventEmitter();
+  win.getTitle = () => 'Shared Worker';
+  app.emit('browser-window-created', {}, win);
+
+  ipcMain.emit('zalo-notification-has-unread', {}, true);
+  assert.deepEqual(getState(), { mode: 'count', count: 1 });
+
+  win.emit('focus');
+  assert.deepEqual(getState(), { mode: 'count', count: 1 });
 });
