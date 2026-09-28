@@ -4,6 +4,17 @@ const logger = require('../utils/logger');
 
 const MARKER = '__zaloHideMessageContent';
 
+// createNotifyForMessages() is the one confirmed place in Zalo's own bundled
+// code that runs for every incoming message notification, in every bundle
+// that builds one (main window, workers, the dedicated znotification
+// window) — regardless of whether the OS ends up showing a popup for it. It
+// has no reliable ipcRenderer access (some of these bundles are workers), so
+// this pings the main process through whichever channel is actually
+// available: ipcRenderer if Node integration reaches this context, else the
+// same "sentinel window title" trick used elsewhere in this codebase, which
+// plugins/launcher-badge/index.js watches for on every window.
+const BADGE_PING = 'try{if(typeof require==="function"){require("electron").ipcRenderer.send("zalo-notification-has-unread",true)}else if(typeof document!=="undefined"){document.title="__ZALO_UNREAD_PING__"}}catch(e){}';
+
 function patchSource(source) {
   const start = source.indexOf('static async createNotifyForMessages(');
   const end = source.indexOf('static createContentMessage(', start);
@@ -15,7 +26,7 @@ function patchSource(source) {
   const avatar = /let [\w$]+=h\.a\.getAvatarFromConversation\(t\)/;
   if (!content || !avatar.test(method)) throw new Error('Notification source changed: message content anchor not found');
 
-  const hidden = `(typeof window==="undefined"||window.${MARKER}!==false)&&(${content[1]}=${content[2]}+"Bạn có tin nhắn mới");`;
+  const hidden = `${BADGE_PING};(typeof window==="undefined"||window.${MARKER}!==false)&&(${content[1]}=${content[2]}+"Bạn có tin nhắn mới");`;
   return source.slice(0, start) + method.replace(avatar, hidden + '$&') + source.slice(end);
 }
 
