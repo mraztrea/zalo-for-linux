@@ -1,21 +1,90 @@
 'use strict';
 
 const { execFile } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const DBUS_OBJECT_PATH = '/com/canonical/Unity/LauncherEntry';
 const DBUS_SIGNAL = 'com.canonical.Unity.LauncherEntry.Update';
+const BADGE_COLOR = '#e5342b';
+// Sentinel the source patch (patch-notification-privacy.js) sets as the
+// window title from inside Zalo's own notification-building code, since that
+// code runs with no reliable ipcRenderer access. Never meant to be seen: the
+// page-title-updated handler below swallows it before it reaches the window.
+const UNREAD_PING_TITLE = '__ZALO_UNREAD_PING__';
+// A window whose title matches one of these never represents the chat the
+// user is actually looking at, so focusing it should not clear the badge.
+const BACKGROUND_WINDOW_TITLES = ['Shared Worker', 'SQLite'];
 
 let _app = null;
-let _lastCount = 0;
+let _tray = null;
+let _iconDataUrl = null;
+let _compositorWin = null;
+let _state = { mode: 'none', count: 0 }; // mode: 'none' | 'dot' | 'count'
+let _pingCount = 0;
 let _gdbusAvailable = null;
 let _desktopFiles = null;
+let _trayBadgeSeq = 0;
 
-function register({ app, ipcMain }) {
+// Called as early as possible (before Zalo's own bundled main.js runs), so that
+// if that macOS-oriented code feature-detects `app.dock` before calling it
+// (rather than branching on `process.platform`), it finds our shim and its
+// badge count reaches us instead of silently going nowhere on Linux.
+function init({ app }) {
   _app = app;
+  if (process.platform !== 'linux') return;
+  installDockShim();
+}
+
+function installDockShim() {
+  if (!_app || _app.dock) return;
+
+  _app.dock = {
+    setBadge(text) { setBadgeFromDockText(text); },
+    getBadge() {
+      if (_state.mode === 'dot') return '•';
+      if (_state.mode === 'count') return String(_state.count);
+      return '';
+    },
+    bounce() { return -1; },
+    cancelBounce() {},
+    downloadFinished() {},
+    setIcon() {},
+    show() { return Promise.resolve(); },
+    hide() {},
+    isVisible() { return true; },
+    setMenu() {},
+    getMenu() { return null; }
+  };
+}
+
+// macOS dock badges are free-form strings: a number, or any other text used
+// purely as a "you have something new" marker. Only the former maps to an
+// exact count; anything else degrades to a dot indicator instead of being
+// dropped.
+function setBadgeFromDockText(rawText) {
+  if (rawText === undefined || rawText === null || rawText === '') {
+    clearBadge();
+    return;
+  }
+  const trimmed = String(rawText).trim();
+  const asNumber = Number.parseInt(trimmed, 10);
+  if (Number.isFinite(asNumber) && String(asNumber) === trimmed) {
+    setCount(asNumber);
+  } else {
+    setDot();
+  }
+}
+
+function register({ app, ipcMain, tray, iconPath }) {
+  _app = app;
+  _tray = tray || null;
 
   if (process.platform !== 'linux') return;
 
-  _desktopFiles = getDesktopFiles(app);
+  installDockShim();
+  captureTrayIcon(iconPath);
 
   try {
     if (app.setDesktopName) {
@@ -27,39 +96,91 @@ function register({ app, ipcMain }) {
     setCount(rawCount);
   });
 
+  // Sent by patch-notification-privacy.js's injection into
+  // Notifier.createNotifyForMessages() — the one confirmed place in Zalo's
+  // own bundled code that runs for every incoming message notification, so
+  // it fires whether or not the OS actually shows a popup for it. We don't
+  // get an exact unread count from it, only "one more thing arrived", so it
+  // accumulates into a running counter that resets when the user focuses the
+  // window again.
+  ipcMain.on('zalo-notification-has-unread', (_event, hasUnread) => {
+    if (hasUnread) {
+      _pingCount += 1;
+      setCount(_pingCount);
+    } else {
+      clearBadge();
+    }
+  });
+
   app.on('browser-window-created', (_event, win) => {
-    win.on('page-title-updated', (_event, title) => {
+    win.on('page-title-updated', (event, title) => {
+      if (title === UNREAD_PING_TITLE) {
+        event.preventDefault();
+        _pingCount += 1;
+        setCount(_pingCount);
+        return;
+      }
       const count = parseTitleCount(title);
       if (count !== null) setCount(count);
+    });
+
+    win.on('focus', () => {
+      if (BACKGROUND_WINDOW_TITLES.includes(win.getTitle())) return;
+      clearBadge();
     });
   });
 
   app.on('before-quit', () => {
-    setCount(0);
+    clearBadge();
   });
 }
 
 function setCount(rawCount) {
   const count = normalizeCount(rawCount);
-  if (count === _lastCount) return;
+  applyState(count > 0 ? { mode: 'count', count } : { mode: 'none', count: 0 });
+}
 
-  _lastCount = count;
+function setDot() {
+  // An exact count is strictly more useful than a plain dot, so don't let a
+  // vaguer "something is unread" signal stomp on a number we already have.
+  if (_state.mode === 'count') return;
+  applyState({ mode: 'dot', count: 0 });
+}
+
+function clearBadge() {
+  _pingCount = 0;
+  applyState({ mode: 'none', count: 0 });
+}
+
+function applyState(next) {
+  if (_state.mode === next.mode && _state.count === next.count) return;
+  _state = next;
+  publish();
+}
+
+function publish() {
+  const { mode, count } = _state;
 
   try {
     if (_app && _app.setBadgeCount) {
-      _app.setBadgeCount(count);
+      // Electron's own Linux support only does anything under Unity, but it's
+      // free to call and some environments (Electron built with libunity) do
+      // honor it directly.
+      _app.setBadgeCount(mode === 'count' ? count : mode === 'dot' ? 1 : 0);
     }
   } catch (_) {}
 
-  publishUnityBadge(count);
+  publishUnityBadge(mode, count);
+  updateTrayIcon(mode, count);
 }
 
-function publishUnityBadge(count) {
+function publishUnityBadge(mode, count) {
   if (process.platform !== 'linux') return;
   if (_gdbusAvailable === false) return;
 
-  const visible = count > 0;
-  const payload = `{ 'count': <int64 ${count}>, 'count-visible': <${visible ? 'true' : 'false'}> }`;
+  const visible = mode !== 'none';
+  const emittedCount = mode === 'count' ? count : mode === 'dot' ? 1 : 0;
+  const payload = `{ 'count': <int64 ${emittedCount}>, 'count-visible': <${visible ? 'true' : 'false'}> }`;
 
   getDesktopFiles(_app).forEach((desktopFile) => {
     execFile('gdbus', [
@@ -84,6 +205,98 @@ function publishUnityBadge(count) {
   });
 }
 
+// The taskbar badge above depends on the desktop environment recognizing the
+// running window as the owner of a specific .desktop file. Draws the badge
+// directly onto the tray icon instead, which we fully control and which
+// works the same on every desktop environment.
+function captureTrayIcon(iconPath) {
+  try {
+    if (iconPath && fs.existsSync(iconPath)) {
+      const buf = fs.readFileSync(iconPath);
+      _iconDataUrl = `data:image/png;base64,${buf.toString('base64')}`;
+    }
+  } catch (_) {}
+}
+
+function getCompositorWindow() {
+  if (_compositorWin && !_compositorWin.isDestroyed()) return _compositorWin;
+
+  const { BrowserWindow } = require('electron');
+  _compositorWin = new BrowserWindow({
+    show: false,
+    width: 64,
+    height: 64,
+    webPreferences: { sandbox: true }
+  });
+  _compositorWin.loadURL('about:blank').catch(() => {});
+  return _compositorWin;
+}
+
+function updateTrayIcon(mode, count) {
+  if (!_tray || !_iconDataUrl) return;
+
+  const seq = ++_trayBadgeSeq;
+  const showBadge = mode !== 'none';
+  const label = mode === 'count' ? (count > 99 ? '99+' : String(count)) : null;
+
+  let win;
+  try {
+    win = getCompositorWindow();
+  } catch (_) {
+    return;
+  }
+
+  win.webContents.executeJavaScript(buildTrayBadgeScript(_iconDataUrl, showBadge, label), true)
+    .then((dataUrl) => {
+      if (seq !== _trayBadgeSeq || !_tray || !dataUrl) return;
+      const { nativeImage } = require('electron');
+      const image = nativeImage.createFromDataURL(dataUrl);
+      if (!image.isEmpty()) _tray.setImage(image);
+    })
+    .catch(() => {});
+}
+
+function buildTrayBadgeScript(baseDataUrl, showBadge, label) {
+  return `(() => new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        const size = Math.max(img.naturalWidth || 0, img.naturalHeight || 0, 64);
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, size, size);
+        if (${JSON.stringify(Boolean(showBadge))}) {
+          const r = size * 0.32;
+          const cx = size - r * 0.9;
+          const cy = r * 0.9;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fillStyle = ${JSON.stringify(BADGE_COLOR)};
+          ctx.fill();
+          ctx.lineWidth = Math.max(1, size * 0.035);
+          ctx.strokeStyle = '#ffffff';
+          ctx.stroke();
+          const label = ${JSON.stringify(label)};
+          if (label) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold ' + Math.round(r * 1.05) + 'px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, cx, cy + size * 0.01);
+          }
+        }
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => resolve(null);
+      img.src = ${JSON.stringify(baseDataUrl)};
+    } catch (e) {
+      resolve(null);
+    }
+  }))()`;
+}
+
 function normalizeCount(rawCount) {
   const count = Number.parseInt(rawCount, 10);
   if (!Number.isFinite(count) || count < 1) return 0;
@@ -94,6 +307,7 @@ function getDesktopFiles(app) {
   if (_desktopFiles) return _desktopFiles;
 
   const names = [
+    ...discoverInstalledDesktopFiles(),
     process.env.ZALO_DESKTOP_FILE,
     process.env.GTK_DESKTOP_FILE,
     process.env.XDG_CURRENT_DESKTOP_FILE,
@@ -107,6 +321,47 @@ function getDesktopFiles(app) {
 
   _desktopFiles = unique(names.map(normalizeDesktopFile).filter(Boolean));
   return _desktopFiles;
+}
+
+// AppImages are frequently integrated by tools (AppImageLauncher, appimaged)
+// under an unpredictable filename (e.g. appimagekit_<hash>-Zalo.desktop).
+// The desktop environment matches the Unity Launcher DBus signal above to a
+// taskbar entry by that exact filename, so guessing common names alone
+// misses this very common case. Scan the standard XDG locations for any
+// .desktop file whose Exec= line points at the binary we're actually
+// running from.
+function discoverInstalledDesktopFiles(readDirFn = fs.readdirSync, readFileFn = fs.readFileSync) {
+  const target = process.env.APPIMAGE || process.execPath;
+  if (!target) return [];
+
+  const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+  const dataDirs = (process.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':').filter(Boolean);
+  const searchDirs = unique([
+    path.join(dataHome, 'applications'),
+    ...dataDirs.map((dir) => path.join(dir, 'applications'))
+  ]);
+
+  const matches = [];
+  for (const dir of searchDirs) {
+    let entries;
+    try {
+      entries = readDirFn(dir);
+    } catch (_) {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.endsWith('.desktop')) continue;
+      try {
+        const content = readFileFn(path.join(dir, entry), 'utf8');
+        const execLine = content.split('\n').find((line) => line.startsWith('Exec='));
+        if (execLine && execLine.includes(target)) {
+          matches.push(entry);
+        }
+      } catch (_) {}
+    }
+  }
+  return matches;
 }
 
 function getAppImageDesktopFile() {
@@ -138,18 +393,42 @@ function unique(values) {
 function parseTitleCount(title) {
   if (typeof title !== 'string') return null;
 
-  const match = title.match(/^\s*\((\d+)\)/) || title.match(/\b(\d+)\s+(?:tin nhan|message|messages)\b/i);
-  if (!match) return null;
+  const patterns = [
+    /^\s*\((\d+)\)/,
+    /\((\d+)\)\s*$/,
+    /\b(\d+)\s+(?:tin nhắn|tin nhan|message|messages|chưa đọc|chua doc)\b/i
+  ];
 
-  return normalizeCount(match[1]);
+  for (const pattern of patterns) {
+    const match = title.match(pattern);
+    if (match) return normalizeCount(match[1]);
+  }
+  return null;
 }
 
 module.exports = {
+  init,
   register,
+  UNREAD_PING_TITLE,
   _private: {
     getDesktopFiles,
+    discoverInstalledDesktopFiles,
     normalizeDesktopFile,
     normalizeCount,
-    parseTitleCount
+    parseTitleCount,
+    setBadgeFromDockText,
+    setCount,
+    setDot,
+    clearBadge,
+    getState: () => _state,
+    getPingCount: () => _pingCount,
+    resetState: () => {
+      _state = { mode: 'none', count: 0 };
+      _pingCount = 0;
+      _desktopFiles = null;
+      _gdbusAvailable = null;
+      _app = null;
+      _tray = null;
+    }
   }
 };
