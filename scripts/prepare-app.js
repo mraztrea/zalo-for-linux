@@ -216,6 +216,9 @@ async function extractAppAsar() {
 
   const { main: patchNotificationBadge } = require('./patches/patch-notification-badge');
   await patchNotificationBadge();
+
+  const { main: patchNotificationSender } = require('./patches/patch-notification-sender');
+  await patchNotificationSender();
 }
 
 function commandExists(command) {

@@ -2,55 +2,78 @@
   if (window.__zaloNotificationPrivacyMenuInstalled) return;
   window.__zaloNotificationPrivacyMenuInstalled = true;
 
-  const id = 'zalo-notification-privacy-setting-item';
+  const items = [
+    {
+      id: 'zalo-notification-privacy-setting-item',
+      flag: '__zaloHideMessageContent',
+      toggleTitle: 'ZALO_TOGGLE_NOTIFICATION_PRIVACY',
+      icon: '🔒',
+      label: 'Ẩn nội dung tin nhắn trong thông báo',
+      tooltip: 'Ẩn phần xem trước tin nhắn trong thông báo của hệ điều hành'
+    },
+    {
+      id: 'zalo-notification-sender-setting-item',
+      flag: '__zaloHideSender',
+      toggleTitle: 'ZALO_TOGGLE_NOTIFICATION_SENDER',
+      icon: '👤',
+      label: 'Ẩn tên người gửi trong thông báo',
+      tooltip: 'Thông báo chỉ hiện "Zalo – Bạn có tin nhắn mới": không tên, không ảnh đại diện, không nội dung'
+    }
+  ];
 
   function render() {
-    const item = document.getElementById(id);
-    if (!item) return;
-    const enabled = !!window.__zaloHideMessageContent;
-    item.setAttribute('aria-checked', String(enabled));
-    item.querySelector('.zalo-notification-privacy-check').hidden = !enabled;
+    for (const spec of items) {
+      const item = document.getElementById(spec.id);
+      if (!item) continue;
+      const enabled = !!window[spec.flag];
+      item.setAttribute('aria-checked', String(enabled));
+      item.querySelector('.zalo-notification-privacy-check').hidden = !enabled;
+    }
   }
 
-  function toggle() {
+  function toggle(spec) {
     const previousTitle = document.title;
-    document.title = 'ZALO_TOGGLE_NOTIFICATION_PRIVACY';
+    document.title = spec.toggleTitle;
     setTimeout(function () { document.title = previousTitle; }, 100);
   }
 
-  function addMenuItem() {
-    if (document.getElementById(id)) return;
+  function addMenuItems() {
     const containers = document.querySelectorAll('#setting .setting-menu');
     if (!containers.length) return;
     const container = containers[containers.length - 1];
     const reference = container.querySelector('.setting-menu__item');
-    const item = document.createElement('div');
-    item.id = id;
-    item.className = reference ? reference.className : 'setting-menu__item';
-    item.setAttribute('role', 'menuitemcheckbox');
-    item.setAttribute('tabindex', '0');
-    item.title = 'Ẩn phần xem trước tin nhắn trong thông báo của hệ điều hành';
-    item.innerHTML = '<div class="setting-menu__wrapper-content truncate">'
-      + '<div class="setting-menu__icon" style="display:flex;align-items:center;justify-content:center">🔒</div>'
-      + '<p class="setting-menu__name truncate">Ẩn nội dung tin nhắn trong thông báo</p>'
-      + '<span class="zalo-notification-privacy-check" aria-hidden="true">✓</span></div>';
-    item.addEventListener('click', toggle);
-    item.addEventListener('keydown', function (event) {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); }
-    });
-    container.appendChild(item);
-    render();
+    let added = false;
+    for (const spec of items) {
+      if (document.getElementById(spec.id)) continue;
+      const item = document.createElement('div');
+      item.id = spec.id;
+      item.className = reference ? reference.className : 'setting-menu__item';
+      item.setAttribute('role', 'menuitemcheckbox');
+      item.setAttribute('tabindex', '0');
+      item.title = spec.tooltip;
+      item.innerHTML = '<div class="setting-menu__wrapper-content truncate">'
+        + '<div class="setting-menu__icon" style="display:flex;align-items:center;justify-content:center">' + spec.icon + '</div>'
+        + '<p class="setting-menu__name truncate">' + spec.label + '</p>'
+        + '<span class="zalo-notification-privacy-check" aria-hidden="true">✓</span></div>';
+      item.addEventListener('click', function () { toggle(spec); });
+      item.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(spec); }
+      });
+      container.appendChild(item);
+      added = true;
+    }
+    if (added) render();
   }
 
   window.addEventListener('zalo-privacy-changed', render);
-  addMenuItem();
+  addMenuItems();
   let updateQueued = false;
   function scheduleUpdate() {
     if (updateQueued) return;
     updateQueued = true;
     requestAnimationFrame(function () {
       updateQueued = false;
-      addMenuItem();
+      addMenuItems();
     });
   }
   const observer = new MutationObserver(function (mutations) {
