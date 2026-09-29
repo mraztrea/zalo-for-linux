@@ -19,6 +19,14 @@ test.beforeEach(() => {
   resetState();
 });
 
+function makeWindow(title, url = 'file:///zalo/pc-dist/index.html') {
+  const win = new EventEmitter();
+  win.getTitle = () => title;
+  win.webContents = new EventEmitter();
+  win.webContents.getURL = () => url;
+  return win;
+}
+
 test('normalizeCount clamps to a sane badge range', () => {
   assert.equal(normalizeCount('5'), 5);
   assert.equal(normalizeCount(0), 0);
@@ -125,8 +133,7 @@ test('register() wires the IPC channels and the window title to the badge state'
   ipcMain.emit('zalo-notification-badge-count', {}, '0');
   assert.deepEqual(getState(), { mode: 'none', count: 0 });
 
-  const win = new EventEmitter();
-  win.getTitle = () => 'Zalo';
+  const win = makeWindow('Zalo');
   app.emit('browser-window-created', {}, win);
   win.emit('page-title-updated', {}, '(9) Zalo');
   assert.deepEqual(getState(), { mode: 'count', count: 9 });
@@ -140,8 +147,7 @@ test('each "has unread" ping bumps a running counter, reset when the window is f
 
   register({ app, ipcMain, tray: null, iconPath: null });
 
-  const win = new EventEmitter();
-  win.getTitle = () => 'Zalo';
+  const win = makeWindow('Zalo');
   app.emit('browser-window-created', {}, win);
 
   ipcMain.emit('zalo-notification-has-unread', {}, true);
@@ -156,7 +162,7 @@ test('each "has unread" ping bumps a running counter, reset when the window is f
   assert.deepEqual(getState(), { mode: 'count', count: 1 });
 });
 
-test('the sentinel window title also bumps the counter and is never let through to the window', () => {
+test('the znotification popup window showing bumps the counter, without touching Zalo\'s own code', () => {
   const app = new EventEmitter();
   app.setDesktopName = () => {};
   const ipcMain = new EventEmitter();
@@ -164,14 +170,32 @@ test('the sentinel window title also bumps the counter and is never let through 
 
   register({ app, ipcMain, tray: null, iconPath: null });
 
-  const win = new EventEmitter();
-  win.getTitle = () => 'Zalo';
+  const win = makeWindow('Zalo', 'file:///zalo/pc-dist/znotification.html');
   app.emit('browser-window-created', {}, win);
 
-  let prevented = false;
-  win.emit('page-title-updated', { preventDefault: () => { prevented = true; } }, '__ZALO_UNREAD_PING__');
-  assert.equal(prevented, true);
+  win.webContents.emit('did-finish-load');
   assert.deepEqual(getState(), { mode: 'count', count: 1 });
+
+  // Zalo reuses the same window for the next popup: 'show' fires again
+  // without another 'did-finish-load'.
+  win.emit('show');
+  assert.deepEqual(getState(), { mode: 'count', count: 2 });
+});
+
+test('other windows finishing load or showing do not bump the counter', () => {
+  const app = new EventEmitter();
+  app.setDesktopName = () => {};
+  const ipcMain = new EventEmitter();
+  ipcMain.on = ipcMain.addListener.bind(ipcMain);
+
+  register({ app, ipcMain, tray: null, iconPath: null });
+
+  const win = makeWindow('Zalo', 'file:///zalo/pc-dist/index.html');
+  app.emit('browser-window-created', {}, win);
+
+  win.webContents.emit('did-finish-load');
+  win.emit('show');
+  assert.deepEqual(getState(), { mode: 'none', count: 0 });
 });
 
 test('focusing a background helper window (Shared Worker/SQLite) does not clear the badge', () => {
@@ -182,8 +206,7 @@ test('focusing a background helper window (Shared Worker/SQLite) does not clear 
 
   register({ app, ipcMain, tray: null, iconPath: null });
 
-  const win = new EventEmitter();
-  win.getTitle = () => 'Shared Worker';
+  const win = makeWindow('Shared Worker');
   app.emit('browser-window-created', {}, win);
 
   ipcMain.emit('zalo-notification-has-unread', {}, true);

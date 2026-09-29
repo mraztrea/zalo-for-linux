@@ -8,11 +8,16 @@ const path = require('path');
 const DBUS_OBJECT_PATH = '/com/canonical/Unity/LauncherEntry';
 const DBUS_SIGNAL = 'com.canonical.Unity.LauncherEntry.Update';
 const BADGE_COLOR = '#e5342b';
-// Sentinel the source patch (patch-notification-privacy.js) sets as the
-// window title from inside Zalo's own notification-building code, since that
-// code runs with no reliable ipcRenderer access. Never meant to be seen: the
-// page-title-updated handler below swallows it before it reaches the window.
-const UNREAD_PING_TITLE = '__ZALO_UNREAD_PING__';
+// Zalo shows an incoming-message popup by loading this dedicated window
+// rather than the standard Web Notification API (confirmed by the existing
+// notification-privacy plugin/patch, which syncs to it by this URL too). Its
+// mere appearance is itself the "something just arrived" signal: unlike
+// patching Zalo's own bundled JS (tried before and reverted — it broke the
+// popup itself, most likely by calling `require(...)` inside a webpack
+// module whose local `require` binding is the bundler's own internal module
+// loader, not Node's), watching an Electron window-lifecycle event from here
+// cannot disturb whatever that bundle does to actually render the popup.
+const NOTIFICATION_WINDOW_URL_PATTERN = /znotification\.html/i;
 // A window whose title matches one of these never represents the chat the
 // user is actually looking at, so focusing it should not clear the badge.
 const BACKGROUND_WINDOW_TITLES = ['Shared Worker', 'SQLite'];
@@ -96,13 +101,10 @@ function register({ app, ipcMain, tray, iconPath }) {
     setCount(rawCount);
   });
 
-  // Sent by patch-notification-privacy.js's injection into
-  // Notifier.createNotifyForMessages() — the one confirmed place in Zalo's
-  // own bundled code that runs for every incoming message notification, so
-  // it fires whether or not the OS actually shows a popup for it. We don't
-  // get an exact unread count from it, only "one more thing arrived", so it
-  // accumulates into a running counter that resets when the user focuses the
-  // window again.
+  // Kept as a general-purpose channel for any future sender that knows
+  // "something is unread" but not the exact count. We don't get an exact
+  // count from it, so each ping accumulates into a running counter that
+  // resets when the user focuses the window again.
   ipcMain.on('zalo-notification-has-unread', (_event, hasUnread) => {
     if (hasUnread) {
       _pingCount += 1;
@@ -113,13 +115,7 @@ function register({ app, ipcMain, tray, iconPath }) {
   });
 
   app.on('browser-window-created', (_event, win) => {
-    win.on('page-title-updated', (event, title) => {
-      if (title === UNREAD_PING_TITLE) {
-        event.preventDefault();
-        _pingCount += 1;
-        setCount(_pingCount);
-        return;
-      }
+    win.on('page-title-updated', (_event, title) => {
       const count = parseTitleCount(title);
       if (count !== null) setCount(count);
     });
@@ -128,6 +124,20 @@ function register({ app, ipcMain, tray, iconPath }) {
       if (BACKGROUND_WINDOW_TITLES.includes(win.getTitle())) return;
       clearBadge();
     });
+
+    const pingIfNotificationWindow = () => {
+      try {
+        if (NOTIFICATION_WINDOW_URL_PATTERN.test(win.webContents.getURL())) {
+          _pingCount += 1;
+          setCount(_pingCount);
+        }
+      } catch (_) {}
+    };
+    // 'show' fires every time Zalo reuses/re-shows this window for a new
+    // popup; 'did-finish-load' also catches the very first one, in case it's
+    // already visible by the time it finishes loading.
+    win.webContents.on('did-finish-load', pingIfNotificationWindow);
+    win.on('show', pingIfNotificationWindow);
   });
 
   app.on('before-quit', () => {
@@ -409,7 +419,6 @@ function parseTitleCount(title) {
 module.exports = {
   init,
   register,
-  UNREAD_PING_TITLE,
   _private: {
     getDesktopFiles,
     discoverInstalledDesktopFiles,
