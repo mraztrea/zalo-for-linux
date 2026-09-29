@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -38,10 +38,6 @@ if (process.platform === 'linux') {
 
 const screenshotPlugin = require('./plugins/screenshot');
 const launcherBadgePlugin = require('./plugins/launcher-badge');
-// Installed before Zalo's bundled main.js loads (see bootstrap() below): if
-// that macOS-oriented code feature-detects `app.dock` rather than branching
-// on process.platform, this shim is what lets its badge calls reach us here.
-launcherBadgePlugin.init({ app });
 const notificationPrivacyPlugin = require('./plugins/notification-privacy');
 const userscriptsPlugin = require('./plugins/userscripts');
 const zcallBridgePlugin = require('./plugins/zcall-bridge');
@@ -251,7 +247,7 @@ app.once('ready', () => {
   }
 
 // Register plugins
-  launcherBadgePlugin.register({ app, ipcMain, tray, iconPath });
+  launcherBadgePlugin.register({ app, ipcMain, BrowserWindow, nativeImage, tray, iconPath });
   screenshotPlugin.register({ ipcMain });
   notificationPrivacyPlugin.register({ app, BrowserWindow });
   userscriptsPlugin.register({ app, ipcMain, BrowserWindow });
